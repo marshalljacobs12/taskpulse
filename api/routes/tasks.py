@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from api.schemas.task import TaskCreate, TaskResponse
 from api.models.task import Task
 from api.services.database import get_db
+from api.services.queue import publish_task
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -12,6 +13,19 @@ async def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
+    
+    # Publish to queue
+    task_data = {
+        "task_id": db_task.id,
+        "type": db_task.type,
+        "params": db_task.params
+    }
+    try:
+        publish_task(task_data)
+    except Exception as e:
+        # Log error in production; for now, just raise it
+        raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
+    
     return db_task
 
 @router.get("/{task_id}", response_model=TaskResponse)
