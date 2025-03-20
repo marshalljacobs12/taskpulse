@@ -21,3 +21,4 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     retries = Column(Integer, default=0, nullable=False)
+    schedule = Column(String, nullable=True)  # e.g., "2025-03-21T10:00:00Z" or "*/5 * * * *" (cron)
