@@ -1,9 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from api.models.task import Base
+from api.config import settings
 
-DATABASE_URL = "postgresql://taskpulse:secret@localhost:5432/taskpulse_db"
-engine = create_engine(DATABASE_URL)
+engine = create_engine(settings.database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():

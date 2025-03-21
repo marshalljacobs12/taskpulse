@@ -1,17 +1,12 @@
 import pika
 import json
-
-RABBITMQ_HOST = "localhost"
-RABBITMQ_PORT = 5672
-QUEUE_NAME = "task_queue"
-DLX_NAME = "dead_letter_exchange"
-DLQ_NAME = "dead_letter_queue"
+from api.config import settings
 
 def get_connection():
-    credentials = pika.PlainCredentials("guest", "guest")
+    credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password)
     parameters = pika.ConnectionParameters(
-        host=RABBITMQ_HOST,
-        port=RABBITMQ_PORT,
+        host=settings.rabbitmq_host,
+        port=settings.rabbitmq_port,
         credentials=credentials
     )
     try:
@@ -27,19 +22,19 @@ def publish_task(task_data: dict):
     channel = connection.channel()
     
     # Declare dead-letter exchange and queue
-    channel.exchange_declare(exchange=DLX_NAME, exchange_type="direct", durable=True)
-    channel.queue_declare(queue=DLQ_NAME, durable=True)
-    channel.queue_bind(queue=DLQ_NAME, exchange=DLX_NAME, routing_key=DLQ_NAME)
+    channel.exchange_declare(exchange=settings.dlx_name, exchange_type="direct", durable=True)
+    channel.queue_declare(queue=settings.dlq_name, durable=True)
+    channel.queue_bind(queue=settings.dlq_name, exchange=settings.dlx_name, routing_key=settings.dlq_name)
     
     # Declare main queue with DLQ settings
-    args = {"x-dead-letter-exchange": DLX_NAME, "x-dead-letter-routing-key": DLQ_NAME}
-    channel.queue_declare(queue=QUEUE_NAME, durable=True, arguments=args)
-    print(f"Queue {QUEUE_NAME} declared with DLQ settings")
+    args = {"x-dead-letter-exchange": settings.dlx_name, "x-dead-letter-routing-key": settings.dlq_name}
+    channel.queue_declare(queue=settings.queue_name, durable=True, arguments=args)
+    print(f"Queue {settings.queue_name} declared with DLQ settings")
     
     print(f"Publishing task: {task_data}")
     channel.basic_publish(
         exchange="",
-        routing_key=QUEUE_NAME,
+        routing_key=settings.queue_name,
         body=json.dumps(task_data).encode(),
         properties=pika.BasicProperties(delivery_mode=2)
     )

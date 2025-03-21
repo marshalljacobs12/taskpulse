@@ -16,15 +16,10 @@ from api.services.metrics import TASKS_SUCCEEDED, TASKS_FAILED, TASKS_RETRIED, T
 from api.services.logging import logger
 from prometheus_client import start_http_server
 from threading import Thread
+from api.config import settings
 
-DATABASE_URL = "postgresql://taskpulse:secret@localhost:5432/taskpulse_db"
-engine = create_engine(DATABASE_URL)
+engine = create_engine(settings.database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-RABBITMQ_HOST = "localhost"
-RABBITMQ_PORT = 5672
-QUEUE_NAME = "task_queue"
-MAX_RETRIES = 3
 
 def get_db():
     db = SessionLocal()
@@ -61,17 +56,17 @@ def process_task(task_data, db, channel, method):
         logger.error(f"Task {task_id} failed: {str(e)}")
         task.retries += 1
         TASKS_RETRIED.labels(type=task_data["type"]).inc()
-        if task.retries >= MAX_RETRIES:
+        if task.retries >= settings.max_retries:
             task.status = TaskStatus.FAILED
             db.commit()
-            logger.error(f"Task {task_id} failed after {MAX_RETRIES} retries, sent to DLQ")
+            logger.error(f"Task {task_id} failed after {settings.max_retries} retries, sent to DLQ")
             TASKS_FAILED.labels(type=task_data["type"]).inc()
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         else:
             task.status = TaskStatus.PENDING
             db.commit()
             delay = 2 ** task.retries
-            logger.info(f"Task {task_id} requeued with {delay}s delay (retry {task.retries}/{MAX_RETRIES})")
+            logger.info(f"Task {task_id} requeued with {delay}s delay (retry {task.retries}/{settings.max_retries})")
             time.sleep(delay)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
     finally:
@@ -89,10 +84,10 @@ def callback(ch, method, properties, body):
         db.close()
 
 def main():
-    credentials = pika.PlainCredentials("guest", "guest")
+    credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password)
     parameters = pika.ConnectionParameters(
-        host=RABBITMQ_HOST,
-        port=RABBITMQ_PORT,
+        host=settings.rabbitmq_host,
+        port=settings.rabbitmq_port,
         credentials=credentials
     )
     try:
@@ -104,12 +99,12 @@ def main():
     channel = connection.channel()
     # No queue_declare here; assume API sets it up
     channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
+    channel.basic_consume(queue=settings.queue_name, on_message_callback=callback)
     logger.info("Worker started. Waiting for tasks...")
     channel.start_consuming()
 
 if __name__ == "__main__":
     # Start Prometheus metrics server on port 8001
-    Thread(target=start_http_server, args=(8001,), daemon=True).start()
+    Thread(target=start_http_server, args=(settings.worker_metrics_port,), daemon=True).start()
     logger.info("Metrics server started on http://localhost:8001/metrics")
     main()
