@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from api.schemas.task import TaskCreate, TaskResponse
-from api.models.task import Task
+from api.models.task import Task, TaskStatus
 from api.services.database import get_db
 from api.services.queue import publish_task
 from api.services.scheduler import schedule_task
+from typing import List
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -32,6 +33,11 @@ async def create_task(task: TaskCreate, db: Session = Depends(get_db)):
             raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
     
     return db_task
+
+@router.get("/failed", response_model=List[TaskResponse])
+async def get_failed_tasks(db: Session = Depends(get_db)):
+    failed_tasks = db.query(Task).filter(Task.status == TaskStatus.FAILED).all()
+    return failed_tasks
 
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int, db: Session = Depends(get_db)):

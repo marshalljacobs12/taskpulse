@@ -5,7 +5,6 @@ from pathlib import Path
 # Add the project root (TaskPulse/) to sys.path
 project_root = Path(__file__).parent.parent  # Goes up from scripts/ to TaskPulse/
 sys.path.append(str(project_root))
-
 import pika
 import json
 from sqlalchemy import create_engine
@@ -42,8 +41,7 @@ def process_task(task_data, db, channel, method):
     print(f"Processing task {task_id}: {task_data['type']}")
 
     try:
-        # Simulate work with a chance of failure
-        if task_data["type"] == "fail_test":  # For testing failures
+        if task_data["type"] == "fail_test":
             raise ValueError("Simulated failure")
         time.sleep(5)
         task.status = TaskStatus.COMPLETED
@@ -56,14 +54,15 @@ def process_task(task_data, db, channel, method):
         if task.retries >= MAX_RETRIES:
             task.status = TaskStatus.FAILED
             db.commit()
-            print(f"Task {task_id} failed after {MAX_RETRIES} retries")
-            channel.basic_ack(delivery_tag=method.delivery_tag)
+            print(f"Task {task_id} failed after {MAX_RETRIES} retries, sending to DLQ")
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         else:
             task.status = TaskStatus.PENDING
             db.commit()
-            # Requeue the task
+            delay = 2 ** task.retries
+            print(f"Task {task_id} requeued with {delay}s delay (retry {task.retries}/{MAX_RETRIES})")
+            time.sleep(delay)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-            print(f"Task {task_id} requeued (retry {task.retries}/{MAX_RETRIES})")
 
 def callback(ch, method, properties, body):
     task_data = json.loads(body.decode())
@@ -83,9 +82,14 @@ def main():
         port=RABBITMQ_PORT,
         credentials=credentials
     )
-    connection = pika.BlockingConnection(parameters)
+    try:
+        connection = pika.BlockingConnection(parameters)
+        print("Worker connected to RabbitMQ")
+    except Exception as e:
+        print(f"Worker failed to connect to RabbitMQ: {str(e)}")
+        return
     channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME, durable=True)
+    # No queue_declare here; assume API sets it up
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
     print("Worker started. Waiting for tasks...")
